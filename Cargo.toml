@@ -1,0 +1,10 @@
+[package]
+name = "catteprinter"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+#btleplug = "0.7"
+btleplug = { path = "btleplug" }
+log = "0.4.14"
+simple_logger = "1.11.0"
