@@ -1,21 +1,5 @@
 use std::convert::TryInto;
 
-pub struct FeedPaper;
-
-impl FeedPaper {
-    pub fn new(steps: u8) -> Command {
-        Command::new(0xa1, &steps.to_be_bytes())
-    }
-}
-
-pub struct WriteLine;
-
-impl WriteLine {
-    pub fn new(line: &[u8; 48]) -> Command {
-        Command::new(0xa2, line)
-    }
-}
-
 #[derive(Debug, PartialEq)]
 pub struct Command {
     command: u8,
@@ -24,7 +8,10 @@ pub struct Command {
 
 impl Command {
     pub fn new(command: u8, payload: &[u8]) -> Command {
-        Command { command, payload: payload.to_vec() }
+        Command {
+            command,
+            payload: payload.to_vec(),
+        }
     }
 
     pub fn as_bytes(&self) -> Vec<u8> {
@@ -77,21 +64,6 @@ impl Command {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
-    #[test]
-    fn feed_paper() {
-        let cmd = FeedPaper::new(0x0001);
-        assert_eq!(cmd, Command {
-            command: 0xbd,
-            payload: vec![0x00, 0x01],
-        });
-
-        let cmd = FeedPaper::new(0xabcd);
-        assert_eq!(cmd, Command {
-            command: 0xbd,
-            payload: vec![0xab, 0xcd],
-        });
-    }
 
     #[test]
     fn command_as_bytes() {

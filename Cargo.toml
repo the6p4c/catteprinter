@@ -8,3 +8,6 @@ edition = "2018"
 btleplug = { path = "btleplug" }
 log = "0.4.14"
 simple_logger = "1.11.0"
+uuid = "0.8.2"
+itertools = "0.10.1"
+image = "0.23.14"
