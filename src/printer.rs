@@ -1,9 +1,61 @@
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 use crate::command::Command;
+use crate::{Error, Result};
 use btleplug::api::bleuuid::uuid_from_u16;
-use btleplug::api::{Characteristic, Peripheral, WriteType};
+use btleplug::api::{Central, CentralEvent, Characteristic, Peripheral, WriteType};
+#[cfg(target_os = "linux")]
+use btleplug::bluez::{manager::Manager, peripheral::Peripheral as NativePeripheral};
+#[cfg(target_os = "windows")]
+use btleplug::winrtble::{manager::Manager, peripheral::Peripheral as NativePeripheral};
 use uuid::Uuid;
 
-const COMMAND_CHARACTERISTIC_UUID: Uuid = uuid_from_u16(0xae01);
+pub const COMMAND_SERVICE_UUID: Uuid = uuid_from_u16(0xaf30);
+pub const COMMAND_CHARACTERISTIC_UUID: Uuid = uuid_from_u16(0xae01);
+
+pub fn find_printer() -> Result<Printer<NativePeripheral>> {
+    let manager = Manager::new().unwrap();
+    let adapters = manager.adapters().unwrap();
+    let central = adapters.into_iter().next().unwrap();
+
+    let central_recv = central.event_receiver().unwrap();
+    central.start_scan()?;
+
+    let (addr_send, addr_recv) = mpsc::channel();
+    thread::spawn(move || {
+        loop {
+            match central_recv.recv() {
+                Ok(CentralEvent::ServicesAdvertisement {
+                    address, services, ..
+                }) => {
+                    if services.contains(&COMMAND_SERVICE_UUID) {
+                        addr_send
+                            .send(address)
+                            .expect("could not send address to main thread");
+                    }
+                }
+                Ok(_) => {}
+                // TODO: um
+                Err(_) => {}
+            }
+        }
+    });
+
+    let address = addr_recv
+        .recv_timeout(Duration::from_secs(10))
+        .map_err(|_| Error::PrinterNotFound)?;
+
+    central.stop_scan()?;
+
+    let device = central
+        .peripherals()
+        .into_iter()
+        .find(|p| p.address() == address)
+        .ok_or(Error::PrinterNotFound)?;
+
+    Printer::new(device)
+}
 
 pub struct Printer<D: Peripheral> {
     device: D,
@@ -11,49 +63,49 @@ pub struct Printer<D: Peripheral> {
 }
 
 impl<D: Peripheral> Printer<D> {
-    pub fn new(device: D) -> Self {
-        device.connect().unwrap();
+    pub fn new(device: D) -> Result<Self> {
+        device.connect()?;
 
-        let characteristics = device.discover_characteristics().unwrap();
+        let characteristics = device.discover_characteristics()?;
         let command_characteristic = characteristics
             .iter()
             .find(|c| c.uuid == COMMAND_CHARACTERISTIC_UUID)
-            .unwrap();
+            .ok_or(Error::PrinterNotFound)?;
         let command_characteristic = command_characteristic.clone();
 
-        Printer {
+        Ok(Printer {
             device,
             command_characteristic,
-        }
+        })
     }
 
-    pub fn send(&self, command: &Command) {
-        self.send_bytes(&command.as_bytes());
+    pub fn send(&self, command: &Command) -> Result<()> {
+        self.send_bytes(&command.as_bytes())
     }
 
-    pub fn send_all(&self, command: &[Command]) {
+    pub fn send_all(&self, command: &[Command]) -> Result<()> {
         let buf = command
             .iter()
             .map(Command::as_bytes)
             .flatten()
             .collect::<Vec<_>>();
-        self.send_bytes(&buf);
+        self.send_bytes(&buf)
     }
 
-    fn send_bytes(&self, bytes: &[u8]) {
+    fn send_bytes(&self, bytes: &[u8]) -> Result<()> {
         // TODO: this is the MTU that's negotiated for my device - is this true
         // for all of them?
         const MTU: usize = 248;
 
         // 4 bytes required for L2CAP header
         for chunk in bytes.chunks(MTU - 4) {
-            self.device
-                .write(
-                    &self.command_characteristic,
-                    chunk,
-                    WriteType::WithoutResponse,
-                )
-                .unwrap();
+            self.device.write(
+                &self.command_characteristic,
+                chunk,
+                WriteType::WithoutResponse,
+            )?;
         }
+
+        Ok(())
     }
 }
