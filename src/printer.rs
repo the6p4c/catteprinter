@@ -6,15 +6,18 @@ use crate::{Error, Result};
 use btleplug::api::bleuuid::uuid_from_u16;
 use btleplug::api::{Central, CentralEvent, Characteristic, Peripheral, WriteType};
 #[cfg(target_os = "linux")]
-use btleplug::bluez::{manager::Manager, peripheral::Peripheral as NativePeripheral};
+use btleplug::bluez::manager::Manager;
 #[cfg(target_os = "windows")]
-use btleplug::winrtble::{manager::Manager, peripheral::Peripheral as NativePeripheral};
+use btleplug::winrtble::manager::Manager;
 use uuid::Uuid;
 
-pub const COMMAND_SERVICE_UUID: Uuid = uuid_from_u16(0xaf30);
+// The printer advertises that it supports AF30, but when asked to give its GATT table it instead
+// says AE30. BlueZ appears to (sometimes?) provide that latter option in scan results.
+pub const COMMAND_SERVICE_UUID_ADVERTISED: Uuid = uuid_from_u16(0xaf30);
+pub const COMMAND_SERVICE_UUID_GATT: Uuid = uuid_from_u16(0xae30);
 pub const COMMAND_CHARACTERISTIC_UUID: Uuid = uuid_from_u16(0xae01);
 
-pub fn find_printer() -> Result<Printer<NativePeripheral>> {
+pub fn find_printer() -> Result<Printer<impl Peripheral>> {
     let manager = Manager::new().unwrap();
     let adapters = manager.adapters().unwrap();
     let central = adapters.into_iter().next().unwrap();
@@ -29,7 +32,9 @@ pub fn find_printer() -> Result<Printer<NativePeripheral>> {
                 Ok(CentralEvent::ServicesAdvertisement {
                     address, services, ..
                 }) => {
-                    if services.contains(&COMMAND_SERVICE_UUID) {
+                    if services.contains(&COMMAND_SERVICE_UUID_ADVERTISED)
+                        || services.contains(&COMMAND_SERVICE_UUID_GATT)
+                    {
                         addr_send
                             .send(address)
                             .expect("could not send address to main thread");
